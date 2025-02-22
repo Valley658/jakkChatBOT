@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ css_url }}">
+    <title>Chat</title>
+</head>
+<body>
+    <div class="chat-container">
+        <form method="POST" enctype="multipart/form-data">
+            {{ form.hidden_tag() }}
+            <div class="input-group">
+                {{ form.message.label }} {{ form.message(size=32) }}
+                {{ form.model.label }} {{ form.model(size=32) }}
+                <input type="file" name="file">
+                <button type="submit">Send</button>
+            </div>
+        </form>
+        {% if user_input %}
+        <div class="chat-log">
+            <p><strong>You:</strong> {{ user_input }}</p>
+            <p><strong>Bot:</strong> {{ bot_response }}</p>
+            <audio controls>
+                <source src="{{ audio_url }}" type="audio/wav">
+                Your browser does not support the audio element.
+            </audio>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

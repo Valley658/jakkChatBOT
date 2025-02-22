@@ -1,0 +1,146 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f8f9fa;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 500px;
+    margin: 50px auto;
+    padding: 20px;
+    background-color: #ffffff;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+}
+
+header {
+    background: #333;
+    color: #fff;
+    padding-top: 30px;
+    min-height: 70px;
+    border-bottom: #77aaff 3px solid;
+}
+
+header a {
+    color: #fff;
+    text-decoration: none;
+    text-transform: uppercase;
+    font-size: 16px;
+}
+
+header ul {
+    padding: 0;
+    list-style: none;
+}
+
+header li {
+    float: left;
+    display: inline;
+    padding: 0 20px 0 20px;
+}
+
+header #branding {
+    float: left;
+}
+
+header #branding h1 {
+    margin: 0;
+}
+
+header nav {
+    float: right;
+    margin-top: 10px;
+}
+
+header .highlight, header .current a {
+    color: #77aaff;
+    font-weight: bold;
+}
+
+header a:hover {
+    color: #77aaff;
+    font-weight: bold;
+}
+
+button, input[type="submit"] {
+    display: inline-block;
+    height: 40px;
+    background: #333;
+    color: #fff;
+    border: 0;
+    padding-left: 20px;
+    padding-right: 20px;
+    cursor: pointer;
+    -webkit-transition: background 0.3s ease-in;
+    -moz-transition: background 0.3s ease-in;
+    transition: background 0.3s ease-in;
+}
+
+button:hover, input[type="submit"]:hover {
+    background: #77aaff;
+}
+
+h2 {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.btn {
+    width: 100%;
+    padding: 10px;
+    background-color: #007bff;
+    border: none;
+    color: #ffffff;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn:hover {
+    background-color: #0056b3;
+}
+
+.chat-box {
+    margin-bottom: 20px;
+    padding: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: #e9ecef;
+}
+
+.user-message, .bot-response {
+    margin-bottom: 10px;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+input[type="text"], input[type="password"] {
+    margin-bottom: 10px;
+    padding: 10px;
+    width: 200px;
+}
+
+a {
+    margin-top: 20px;
+    color: #007BFF;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
