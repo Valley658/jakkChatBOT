@@ -3,30 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="{{ css_url }}">
     <title>Chat</title>
+    <link rel="stylesheet" href="{{ css_url }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{{ url_for('static', filename='chat.js') }}"></script>
+    <style>
+        /* Add your CSS styling here */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            width: 80%;
+            margin: auto;
+            overflow: hidden;
+        }
+        header {
+            background: #333;
+            color: #fff;
+            padding-top: 30px;
+            min-height: 70px;
+            border-bottom: #77d42a 3px solid;
+        }
+        header a {
+            color: #fff;
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: 16px;
+        }
+        header ul {
+            padding: 0;
+            list-style: none;
+        }
+        header li {
+            float: left;
+            display: inline;
+            padding: 0 20px 0 20px;
+        }
+        header #branding {
+            float: left;
+        }
+        header #branding h1 {
+            margin: 0;
+        }
+        header nav {
+            float: right;
+            margin-top: 10px;
+        }
+        .content {
+            padding: 20px;
+            background: #fff;
+            margin-top: 20px;
+        }
+        .chat-box {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 20px;
+            height: 300px;
+            overflow-y: scroll;
+        }
+        .chat-box p {
+            margin: 0;
+            padding: 5px;
+            border-bottom: 1px solid #ccc;
+        }
+        .chat-box p:last-child {
+            border-bottom: none;
+        }
+        .message-input {
+            width: 100%;
+            height: 100px; /* Increase height */
+            font-size: 22px; /* Increase font size */
+        }
+        .send-button {
+            font-size: 22px; /* Increase font size */
+            padding: 10px 20px; /* Adjust padding */
+        }
+    </style>
 </head>
 <body>
     <div class="chat-container">
-        <form method="POST" enctype="multipart/form-data">
-            {{ form.hidden_tag() }}
-            <div class="input-group">
-                {{ form.message.label }} {{ form.message(size=32) }}
-                {{ form.model.label }} {{ form.model(size=32) }}
-                <input type="file" name="file">
-                <button type="submit">Send</button>
-            </div>
-        </form>
-        {% if user_input %}
-        <div class="chat-log">
-            <p><strong>You:</strong> {{ user_input }}</p>
-            <p><strong>Bot:</strong> {{ bot_response }}</p>
-            <audio controls>
-                <source src="{{ audio_url }}" type="audio/wav">
-                Your browser does not support the audio element.
-            </audio>
+        <header>
+            <h1>Welcome, {{ username }}!</h1>
+        </header>
+        <div class="chat-box" id="chat-box">
+            <!-- Chat messages will be appended here -->
+            {% for message in chat_memory %}
+                <div class="chat-message">
+                    <strong>{{ message.nickname }}:</strong> {{ message.message }}
+                </div>
+            {% endfor %}
         </div>
-        {% endif %}
+        <form id="chat-form">
+            <textarea id="message" name="message" placeholder="Type your message here..." class="message-input"></textarea>
+            <button type="submit" class="send-button">Send</button>
+            <label for="file-upload" class="custom-file-upload">
+                <i class="fa fa-cloud-upload"></i> Upload
+            </label>
+            <input id="file-upload" type="file" name="file"/>
+            <button type="button" id="mic-button">🎤</button>
+        </form>
+        <form method="post" action="{{ url_for('internet_search') }}">
+            <input type="text" name="query" placeholder="Enter search query">
+            <button type="submit">Search Internet</button>
+        </form>
+        <form method="get" action="{{ url_for('download_models') }}">
+            <button type="submit">Download Models</button>
+        </form>
+        <form method="get" action="{{ url_for('additional_feature') }}">
+            <button type="submit">Execute Additional Feature</button>
+        </form>
     </div>
+    <script>
+        $(document).ready(function() {
+            $('#chat-form').on('submit', function(event) {
+                event.preventDefault();
+                var message = $('#message').val();
+                $.ajax({
+                    url: "{{ url_for('chat') }}",
+                    method: "POST",
+                    data: { message: message },
+                    success: function(response) {
+                        $('#chat-box').append('<div class="chat-message"><strong>You:</strong> ' + response.user_input + '</div>');
+                        $('#chat-box').append('<div class="chat-message"><strong>Bot:</strong> ' + response.bot_response + '</div>');
+                        $('#message').val('');
+                    }
+                });
+            });
+        });
+
+        const micButton = document.getElementById('mic-button');
+        micButton.addEventListener('click', () => {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        const mediaRecorder = new MediaRecorder(stream);
+                        mediaRecorder.start();
+                        const audioChunks = [];
+                        mediaRecorder.addEventListener('dataavailable', event => {
+                            audioChunks.push(event.data);
+                        });
+                        mediaRecorder.addEventListener('stop', () => {
+                            const audioBlob = new Blob(audioChunks);
+                            const formData = new FormData();
+                            formData.append('audio', audioBlob, 'audio.wav');
+                            fetch('{{ url_for("speech_to_text") }}', {
+                                method: 'POST',
+                                body: formData
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.text) {
+                                    document.getElementById('message').value = data.text;
+                                } else {
+                                    alert(data.error);
+                                }
+                            })
+                            .catch(error => console.error('Error:', error));
+                        });
+                        setTimeout(() => {
+                            mediaRecorder.stop();
+                        }, 5000); // Record for 5 seconds
+                    })
+                    .catch(error => console.error('Error accessing microphone:', error));
+            } else {
+                alert('Microphone not supported in this browser.');
+            }
+        });
+    </script>
 </body>
 </html>

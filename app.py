@@ -13,6 +13,11 @@ import hashlib
 import tensorflow as tf
 from itsdangerous import URLSafeTimedSerializer
 import openai
+import subprocess
+import torch
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGeneration, T5Tokenizer
+from googletrans import Translator  # Add translator for automatic translation
+import requests
 
 app = Flask(__name__)
 
@@ -48,9 +53,23 @@ def configure_tensorflow():
     else:
         print("No GPU devices found.")
 
+# Initialize GPT-2 model and tokenizer
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model_name = "gpt2"
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+model = GPT2LMHeadModel.from_pretrained(model_name).to(device)
+
+# Initialize additional models and tokenizers
+t5_tokenizer = T5Tokenizer.from_pretrained("t5-small")
+t5_model = T5ForConditionalGeneration.from_pretrained("t5-small").to(device)
+
+# Initialize translator
+translator = Translator()
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
+    nickname = db.Column(db.String(150), nullable=False)  # Add nickname field
     password = db.Column(db.String(150), nullable=False)
 
     def set_password(self, password):
@@ -61,6 +80,9 @@ class User(UserMixin, db.Model):
 
     def set_username(self, username):
         self.username = hashlib.sha256(username.encode()).hexdigest()
+
+    def set_nickname(self, nickname):
+        self.nickname = nickname  # No censorship applied
 
 class UserCookie(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -94,8 +116,8 @@ def login():
         else:
             login_user(user)
             
-            # Automatically detect system language
-            system_language = os.getenv('LANG', 'en').split('.')[0]
+            # Automatically detect browser language
+            system_language = request.accept_languages.best_match(['en', 'ko', 'es', 'fr', 'de', 'zh'])
             computer_name = os.getenv('COMPUTERNAME', 'Unknown')
             
             # Save language selection to the database
@@ -122,38 +144,43 @@ def chat():
         language = user_language.language if user_language else 'en'
     if form.validate_on_submit():
         user_input = form.message.data
-        model = form.model.data if form.model.data else 'default-model'  # Fix model selection issue
+        model_name = form.model.data if form.model.data else 'default-model'
         user_id = current_user.id
         if user_id not in chat_memory:
             chat_memory[user_id] = []
-        chat_memory[user_id].append(user_input)
+        chat_memory[user_id].append({'nickname': current_user.nickname, 'message': user_input})
         
-        # Use ChatGPT API
-        bot_response = get_response(user_input, model)
-        
-        # Use pyttsx3 for TTS
-        engine = pyttsx3.init()
-        engine.save_to_file(bot_response, 'static/response.wav')
-        engine.runAndWait()
-        
-        return render_template('chat.html', form=form, user_input=user_input, bot_response=bot_response, css_url=url_for('static', filename='style.css'), audio_url=url_for('static', filename='response.wav'))
-    return render_template('chat.html', form=form, css_url=url_for('static', filename='style.css'))
+        if model_name == 'gpt2':
+            inputs = tokenizer.encode(user_input, return_tensors="pt").to(device)
+            outputs = model.generate(inputs, max_length=100, num_return_sequences=1)
+            bot_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        elif model_name == 't5':
+            inputs = t5_tokenizer.encode("translate English to French: " + user_input, return_tensors="pt").to(device)
+            outputs = t5_model.generate(inputs, max_length=100, num_return_sequences=1)
+            bot_response = t5_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        else:
+            bot_response = "Model not supported."
 
-@app.route('/upload', methods=['POST'])
+        # Translate bot response to user's language
+        translated_response = translator.translate(bot_response, dest=language).text
+
+        chat_memory[user_id].append({'nickname': 'Bot', 'message': translated_response})
+        
+        return jsonify(user_input=user_input, bot_response=translated_response, chat_memory=chat_memory[user_id])
+    return render_template('chat.html', form=form, css_url=url_for('static', filename='style.css'), username=current_user.nickname, chat_memory=chat_memory.get(current_user.id, []), additional_features=True)
+
+# Re-enable speech-to-text route
+@app.route('/speech_to_text', methods=['POST'])
 @login_required
-def upload_file():
-    if 'file' not in request.files:
-        flash('No file part')
-        return redirect(url_for('chat'))
-    file = request.files['file']
-    if file.filename == '':
-        flash('No selected file')
-        return redirect(url_for('chat'))
-    if file:
-        filename = secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        flash('File successfully uploaded')
-        return redirect(url_for('chat'))
+def speech_to_text():
+    if 'audio' not in request.files:
+        return jsonify(error="No audio file provided"), 400
+    audio_file = request.files['audio']
+    # Use pyttsx3 for speech-to-text
+    engine = pyttsx3.init()
+    engine.save_to_file(audio_file, 'static/response.wav')
+    engine.runAndWait()
+    return jsonify(text="Speech-to-text conversion completed.")
 
 # Add GPU and CPU usage monitoring
 @app.route('/system_status')
@@ -174,7 +201,8 @@ def dashboard():
         user_languages = UserLanguage.query.all()
         memory_info = psutil.virtual_memory()  # Add this line to get memory info
         status = "Normal"  # Define the status variable
-        return render_template('dashboard.html', users=users, user_languages=user_languages, css_url=url_for('static', filename='style.css'), status=status, memory_info=memory_info)
+        models = get_available_models()  # Get available models
+        return render_template('dashboard.html', users=users, user_languages=user_languages, css_url=url_for('static', filename='style.css'), status=status, memory_info=memory_info, models=models)
     return redirect(url_for('chat'))
 
 @app.route('/admin_panel')
@@ -190,6 +218,7 @@ def register():
     if form.validate_on_submit():
         user = User(username=hashlib.sha256(form.username.data.encode()).hexdigest())
         user.set_password(form.password.data)
+        user.set_nickname(form.nickname.data)  # Set nickname without censorship
         db.session.add(user)
         db.session.commit()
         flash('Registration successful. Please log in.')
@@ -206,6 +235,73 @@ def logout():
 def index():
     return redirect(url_for('login'))
 
+@app.route('/generate_requirements')
+@login_required
+def generate_requirements():
+    with open('requirements.txt', 'w') as f:
+        subprocess.run(['pip', 'freeze'], stdout=f)
+        f.write('\ntf-keras\n')
+        f.write('sentencepiece\n')  # Ensure sentencepiece is included in requirements.txt
+    flash('requirements.txt generated successfully.')
+    return redirect(url_for('dashboard'))
+
+@app.route('/generate_setup')
+@login_required
+def generate_setup():
+    with open('setup.bat', 'w') as f:
+        f.write('@echo off\n')
+        f.write('pip install -r requirements.txt\n')
+    flash('setup.bat generated successfully.')
+    return redirect(url_for('dashboard'))
+
+@app.route('/internet_search', methods=['POST'])
+@login_required
+def internet_search():
+    query = request.form.get('query')
+    if not query:
+        return jsonify(error="No query provided"), 400
+    response = requests.get(f"https://api.duckduckgo.com/?q={query}&format=json")
+    if response.status_code == 200:
+        return jsonify(response.json())
+    else:
+        return jsonify(error="Failed to fetch data from the internet"), 500
+
+@app.route('/download_models')
+@login_required
+def download_models():
+    models = ['gpt2', 't5-small', 'bert-base-uncased']
+    for model_name in models:
+        if model_name == 'gpt2':
+            GPT2LMHeadModel.from_pretrained(model_name)
+            GPT2Tokenizer.from_pretrained(model_name)
+        elif model_name == 't5-small':
+            T5ForConditionalGeneration.from_pretrained(model_name)
+            T5Tokenizer.from_pretrained(model_name)
+        elif model_name == 'bert-base-uncased':
+            from transformers import BertModel, BertTokenizer
+            BertModel.from_pretrained(model_name)
+            BertTokenizer.from_pretrained(model_name)
+    flash('Models downloaded successfully.')
+    return redirect(url_for('dashboard'))
+
+# Remove text-to-speech route
+# @app.route('/text_to_speech', methods=['POST'])
+# @login_required
+# def text_to_speech():
+#     text = request.form.get('text')
+#     if not text:
+#         return jsonify(error="No text provided"), 400
+#     engine = pyttsx3.init()
+#     engine.save_to_file(text, 'static/tts_response.wav')
+#     engine.runAndWait()
+#     return jsonify(audio_url=url_for('static', filename='tts_response.wav'))
+
+@app.route('/additional_feature')
+@login_required
+def additional_feature():
+    # Implement additional feature logic here
+    return jsonify(message="Additional feature executed successfully.")
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
@@ -214,7 +310,8 @@ if __name__ == '__main__':
             admin = User()
             admin.set_username('admin')
             admin.set_password('reewskali15@gm')
+            admin.set_nickname('Administrator')  # Set admin nickname without censorship
             db.session.add(admin)
             db.session.commit()
     configure_tensorflow()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=80)

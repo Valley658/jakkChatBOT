@@ -1,0 +1,12 @@
+flask
+flask-SQLAlchemy
+flask_login
+flask_wtf
+psutil
+pyttsx3
+tensorflow
+itsdangerous
+openai
+flask_sqlalchemy
+transformers
+tf-keras
