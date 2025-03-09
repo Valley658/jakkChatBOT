@@ -12,11 +12,10 @@ import pyttsx3
 import hashlib
 import tensorflow as tf
 from itsdangerous import URLSafeTimedSerializer
-import openai
 import subprocess
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGeneration, T5Tokenizer
-from googletrans import Translator  # Add translator for automatic translation
+from googletrans import Translator
 import requests
 import shutil
 
@@ -33,44 +32,36 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# Serializer for cookies
 serializer = URLSafeTimedSerializer(app.config['COOKIE_SECRET'])
 
-# Lazy load TensorFlow configuration to optimize startup time
 def configure_tensorflow():
     import tensorflow as tf
-    # Suppress TensorFlow logging
     tf.get_logger().setLevel('ERROR')
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
         try:
-            # Set memory growth for each GPU
             for gpu in physical_devices:
                 tf.config.experimental.set_memory_growth(gpu, True)
-            # Set the default GPU to GPU 0
             tf.config.experimental.set_visible_devices(physical_devices[0], 'GPU')
         except RuntimeError as e:
             print(e)
     else:
         print("No GPU devices found.")
 
-# Initialize GPT-2 model and tokenizer
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_name = "gpt2"
 tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 model = GPT2LMHeadModel.from_pretrained(model_name).to(device)
 
-# Initialize additional models and tokenizers
 t5_tokenizer = T5Tokenizer.from_pretrained("t5-small")
 t5_model = T5ForConditionalGeneration.from_pretrained("t5-small").to(device)
 
-# Initialize translator
 translator = Translator()
 
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
-    nickname = db.Column(db.String(150), nullable=False)  # Add nickname field
+    nickname = db.Column(db.String(150), nullable=False)
     password = db.Column(db.String(150), nullable=False)
 
     def set_password(self, password):
@@ -83,7 +74,7 @@ class User(UserMixin, db.Model):
         self.username = hashlib.sha256(username.encode()).hexdigest()
 
     def set_nickname(self, nickname):
-        self.nickname = nickname  # No censorship applied
+        self.nickname = nickname
 
 class UserCookie(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -122,23 +113,17 @@ def login():
             error_message = "Incorrect password."
         else:
             login_user(user)
-            
-            # Automatically detect browser language
             system_language = request.accept_languages.best_match(['en', 'ko', 'es', 'fr', 'de', 'zh'])
             computer_name = os.getenv('COMPUTERNAME', 'Unknown')
-            
-            # Save language selection to the database
             user_language = UserLanguage(user_id=current_user.id, language=system_language, computer_name=computer_name)
             db.session.add(user_language)
             db.session.commit()
-
             if current_user.username == hashlib.sha256('admin'.encode()).hexdigest():
                 return redirect(url_for('dashboard'))
             else:
                 return redirect(url_for('chat', language=system_language))
     return render_template('login.html', form=form, error_message=error_message, css_url=url_for('static', filename='style.css'))
 
-# Add memory feature for chatbot
 chat_memory = {}
 
 @app.route('/chat', methods=['GET', 'POST'])
@@ -155,33 +140,25 @@ def chat():
         chat_memory_entry = ChatMemory(user_id=user_id, nickname=current_user.nickname, message=user_input)
         db.session.add(chat_memory_entry)
         db.session.commit()
-
-        # Use ChatGPT for response
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=user_input,
-            max_tokens=150
-        )
-        bot_response = response.choices[0].text.strip()
-
-        # Translate bot response to Korean
+        
+        # Generate response using GPT-2 model
+        inputs = tokenizer.encode(user_input, return_tensors='pt').to(device)
+        outputs = model.generate(inputs, max_length=150, num_return_sequences=1)
+        bot_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
         translated_response = translator.translate(bot_response, dest='ko').text
-
         chat_memory_entry = ChatMemory(user_id=user_id, nickname='Bot', message=translated_response)
         db.session.add(chat_memory_entry)
         db.session.commit()
-
         return jsonify(user_input=user_input, bot_response=translated_response, chat_memory=[{'nickname': entry.nickname, 'message': entry.message} for entry in ChatMemory.query.filter_by(user_id=user_id).all()])
     return render_template('chat.html', form=form, css_url=url_for('static', filename='style.css'), username=current_user.nickname, chat_memory=[{'nickname': entry.nickname, 'message': entry.message} for entry in ChatMemory.query.filter_by(user_id=current_user.id).all()], additional_features=True)
 
-# Re-enable speech-to-text route
 @app.route('/speech_to_text', methods=['POST'])
 @login_required
 def speech_to_text():
     if 'audio' not in request.files:
         return jsonify(error="No audio file provided"), 400
     audio_file = request.files['audio']
-    # Use pyttsx3 for speech-to-text
     engine = pyttsx3.init()
     engine.save_to_file(audio_file, 'static/response.wav')
     engine.runAndWait()
@@ -218,7 +195,6 @@ def delete_audio():
         return jsonify(message="Audio file deleted successfully")
     return jsonify(error="Audio file not found"), 404
 
-# Add GPU and CPU usage monitoring
 @app.route('/system_status')
 @login_required
 def system_status():
@@ -235,9 +211,9 @@ def dashboard():
     if current_user.username == hashlib.sha256('admin'.encode()).hexdigest():
         users = User.query.all()
         user_languages = UserLanguage.query.all()
-        memory_info = psutil.virtual_memory()  # Add this line to get memory info
-        status = "Normal"  # Define the status variable
-        models = get_available_models()  # Get available models
+        memory_info = psutil.virtual_memory()
+        status = "Normal"
+        models = get_available_models()
         return render_template('dashboard.html', users=users, user_languages=user_languages, css_url=url_for('static', filename='style.css'), status=status, memory_info=memory_info, models=models)
     return redirect(url_for('chat'))
 
@@ -252,9 +228,12 @@ def admin_panel():
 def register():
     form = RegistrationForm()
     if form.validate_on_submit():
+        if len(form.password.data) < 2 or len(form.password.data) >= 16:
+            flash('Password must be at least 2 characters and less than 16 characters.')
+            return redirect(url_for('register'))
         user = User(username=hashlib.sha256(form.username.data.encode()).hexdigest())
         user.set_password(form.password.data)
-        user.set_nickname(form.nickname.data)  # Set nickname without censorship
+        user.set_nickname(form.nickname.data)
         db.session.add(user)
         db.session.commit()
         flash('Registration successful. Please log in.')
@@ -277,7 +256,7 @@ def generate_requirements():
     with open('requirements.txt', 'w') as f:
         subprocess.run(['pip', 'freeze'], stdout=f)
         f.write('\ntf-keras\n')
-        f.write('sentencepiece\n')  # Ensure sentencepiece is included in requirements.txt
+        f.write('sentencepiece\n')
     flash('requirements.txt generated successfully.')
     return redirect(url_for('dashboard'))
 
@@ -287,7 +266,7 @@ def generate_setup():
     with open('setup.bat', 'w') as f:
         f.write('@echo off\n')
         f.write('pip install -r requirements.txt\n')
-        f.write('pip install sentencepiece\n')  # Add this line to install sentencepiece
+        f.write('pip install sentencepiece\n')
     flash('setup.bat generated successfully.')
     return redirect(url_for('dashboard'))
 
@@ -324,19 +303,10 @@ def download_models():
 @app.route('/additional_feature')
 @login_required
 def additional_feature():
-    # Implement additional feature logic here
     return jsonify(message="Additional feature executed successfully.")
 
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        # Create admin account if it doesn't exist
-        if not User.query.filter_by(username=hashlib.sha256('admin'.encode()).hexdigest()).first():
-            admin = User()
-            admin.set_username('admin')
-            admin.set_password('reewsxx13@gm')
-            admin.set_nickname('Administrator')  # Set admin nickname without censorship
-            db.session.add(admin)
-            db.session.commit()
     configure_tensorflow()
     app.run(host='0.0.0.0', port=80)
