@@ -1,4 +1,4 @@
-from flask import Flask, render_template, redirect, url_for, request, send_from_directory, flash, jsonify, make_response
+from flask import Flask, render_template, redirect, url_for, request, send_from_directory, flash, jsonify, make_response, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from forms import LoginForm, RegistrationForm, LanguageForm, ChatForm
@@ -18,6 +18,7 @@ import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGeneration, T5Tokenizer
 from googletrans import Translator  # Add translator for automatic translation
 import requests
+import shutil
 
 app = Flask(__name__)
 
@@ -95,6 +96,12 @@ class UserLanguage(db.Model):
     language = db.Column(db.String(50), nullable=False)
     computer_name = db.Column(db.String(150), nullable=False)
 
+class ChatMemory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    nickname = db.Column(db.String(150), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
@@ -141,33 +148,31 @@ def chat():
     language = request.args.get('language')
     if not language:
         user_language = UserLanguage.query.filter_by(user_id=current_user.id).order_by(UserLanguage.id.desc()).first()
-        language = user_language.language if user_language else 'en'
+        language = user_language.language if user_language else 'ko'
     if form.validate_on_submit():
         user_input = form.message.data
-        model_name = form.model.data if form.model.data else 'default-model'
         user_id = current_user.id
-        if user_id not in chat_memory:
-            chat_memory[user_id] = []
-        chat_memory[user_id].append({'nickname': current_user.nickname, 'message': user_input})
-        
-        if model_name == 'gpt2':
-            inputs = tokenizer.encode(user_input, return_tensors="pt").to(device)
-            outputs = model.generate(inputs, max_length=100, num_return_sequences=1)
-            bot_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        elif model_name == 't5':
-            inputs = t5_tokenizer.encode("translate English to French: " + user_input, return_tensors="pt").to(device)
-            outputs = t5_model.generate(inputs, max_length=100, num_return_sequences=1)
-            bot_response = t5_tokenizer.decode(outputs[0], skip_special_tokens=True)
-        else:
-            bot_response = "Model not supported."
+        chat_memory_entry = ChatMemory(user_id=user_id, nickname=current_user.nickname, message=user_input)
+        db.session.add(chat_memory_entry)
+        db.session.commit()
 
-        # Translate bot response to user's language
-        translated_response = translator.translate(bot_response, dest=language).text
+        # Use ChatGPT for response
+        response = openai.Completion.create(
+            engine="text-davinci-003",
+            prompt=user_input,
+            max_tokens=150
+        )
+        bot_response = response.choices[0].text.strip()
 
-        chat_memory[user_id].append({'nickname': 'Bot', 'message': translated_response})
-        
-        return jsonify(user_input=user_input, bot_response=translated_response, chat_memory=chat_memory[user_id])
-    return render_template('chat.html', form=form, css_url=url_for('static', filename='style.css'), username=current_user.nickname, chat_memory=chat_memory.get(current_user.id, []), additional_features=True)
+        # Translate bot response to Korean
+        translated_response = translator.translate(bot_response, dest='ko').text
+
+        chat_memory_entry = ChatMemory(user_id=user_id, nickname='Bot', message=translated_response)
+        db.session.add(chat_memory_entry)
+        db.session.commit()
+
+        return jsonify(user_input=user_input, bot_response=translated_response, chat_memory=[{'nickname': entry.nickname, 'message': entry.message} for entry in ChatMemory.query.filter_by(user_id=user_id).all()])
+    return render_template('chat.html', form=form, css_url=url_for('static', filename='style.css'), username=current_user.nickname, chat_memory=[{'nickname': entry.nickname, 'message': entry.message} for entry in ChatMemory.query.filter_by(user_id=current_user.id).all()], additional_features=True)
 
 # Re-enable speech-to-text route
 @app.route('/speech_to_text', methods=['POST'])
@@ -181,6 +186,37 @@ def speech_to_text():
     engine.save_to_file(audio_file, 'static/response.wav')
     engine.runAndWait()
     return jsonify(text="Speech-to-text conversion completed.")
+
+@app.route('/text_to_speech', methods=['POST'])
+@login_required
+def text_to_speech():
+    text = request.form.get('text')
+    if not text:
+        return jsonify(error="No text provided"), 400
+    audio_file_path = 'static/tts_response.wav'
+    engine = pyttsx3.init()
+    engine.save_to_file(text, audio_file_path)
+    engine.runAndWait()
+    return jsonify(audio_url=url_for('play_audio'))
+
+@app.route('/play_audio')
+@login_required
+def play_audio():
+    audio_file_path = 'static/tts_response.wav'
+    if os.path.exists(audio_file_path):
+        response = make_response(send_file(audio_file_path, mimetype='audio/wav'))
+        response.headers['Content-Disposition'] = 'inline; filename=response.wav'
+        return response
+    return jsonify(error="Audio file not found"), 404
+
+@app.route('/delete_audio')
+@login_required
+def delete_audio():
+    audio_file_path = 'static/tts_response.wav'
+    if os.path.exists(audio_file_path):
+        os.remove(audio_file_path)
+        return jsonify(message="Audio file deleted successfully")
+    return jsonify(error="Audio file not found"), 404
 
 # Add GPU and CPU usage monitoring
 @app.route('/system_status')
@@ -283,18 +319,6 @@ def download_models():
             BertTokenizer.from_pretrained(model_name)
     flash('Models downloaded successfully.')
     return redirect(url_for('dashboard'))
-
-# Remove text-to-speech route
-# @app.route('/text_to_speech', methods=['POST'])
-# @login_required
-# def text_to_speech():
-#     text = request.form.get('text')
-#     if not text:
-#         return jsonify(error="No text provided"), 400
-#     engine = pyttsx3.init()
-#     engine.save_to_file(text, 'static/tts_response.wav')
-#     engine.runAndWait()
-#     return jsonify(audio_url=url_for('static', filename='tts_response.wav'))
 
 @app.route('/additional_feature')
 @login_required

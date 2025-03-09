@@ -10,3 +10,5 @@ openai
 flask_sqlalchemy
 transformers
 tf-keras
+torch
+googletrans==4.0.0-rc1

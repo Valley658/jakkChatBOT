@@ -1,5 +1,5 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField, SelectField, TextAreaField
+from wtforms import StringField, PasswordField, SubmitField, TextAreaField
 from wtforms.validators import DataRequired, Length, EqualTo
 
 class LoginForm(FlaskForm):
@@ -9,15 +9,15 @@ class LoginForm(FlaskForm):
 
 class RegistrationForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired(), Length(min=2, max=150)])
-    nickname = StringField('Nickname', validators=[DataRequired(), Length(min=2, max=150)])  # Add nickname field
-    password = PasswordField('Password', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[DataRequired(), Length(min=6, max=150)])
+    confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
+    nickname = StringField('Nickname', validators=[DataRequired(), Length(min=2, max=150)])
     submit = SubmitField('Register')
 
 class LanguageForm(FlaskForm):
-    language = SelectField('Select Language', choices=[('en', 'English'), ('es', 'Spanish'), ('fr', 'French')], validators=[DataRequired()])
-    submit = SubmitField('Select')
+    language = StringField('Language', validators=[DataRequired(), Length(min=2, max=50)])
+    submit = SubmitField('Save')
 
 class ChatForm(FlaskForm):
-    message = TextAreaField('Message', validators=[DataRequired()])
-    model = SelectField('Model', choices=[('default', 'Default Model'), ('advanced', 'Advanced Model')], validators=[DataRequired()])
+    message = TextAreaField('Message', validators=[DataRequired(), Length(min=1, max=500)])
     submit = SubmitField('Send')
