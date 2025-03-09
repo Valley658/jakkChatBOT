@@ -287,6 +287,7 @@ def generate_setup():
     with open('setup.bat', 'w') as f:
         f.write('@echo off\n')
         f.write('pip install -r requirements.txt\n')
+        f.write('pip install sentencepiece\n')  # Add this line to install sentencepiece
     flash('setup.bat generated successfully.')
     return redirect(url_for('dashboard'))
 
@@ -333,7 +334,7 @@ if __name__ == '__main__':
         if not User.query.filter_by(username=hashlib.sha256('admin'.encode()).hexdigest()).first():
             admin = User()
             admin.set_username('admin')
-            admin.set_password('reewskali15@gm')
+            admin.set_password('reewsxx13@gm')
             admin.set_nickname('Administrator')  # Set admin nickname without censorship
             db.session.add(admin)
             db.session.commit()
